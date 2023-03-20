@@ -39,34 +39,64 @@ class RLWordSwap(SearchMethod):
         # Get the indices of the candidate words to switch out 
         tokens = original_text.split(' ')
         indicators = [0 for _ in range(len(tokens))]
-        index_indicators = []
-        original_word = []
-        transformed_word = []
+        original_words = {}  # maps the index of the token in the sentence to the original token
+        transformed_words = {}  # maps the index of the token in the sentence to a list of token options (including the original token)
         for text in transformed_texts:
             transformed_tokens = text.split(' ')
             for j in len(tokens):
-                if tokens[j] != transformed_tokens:
+                # If the original token is different from the transformed token
+                if tokens[j] != transformed_tokens[j]:
+                    # Non-masked at this token because can be modified
                     indicators[j] = 1
-                    original_word.append(tokens[j])
-                    transformed_word.append(transformed_tokens[j])
-                    index_indicators.append(j)     
+
+                    # If the original token hasn't been accounted for, then add it to the original word list
+                    if j not in original_words.keys(): 
+                        original_words[j] = tokens[j]
+
+                    # If a new list of word modification hasn't been created for this index 
+                    if j not in transformed_words.keys():
+                        transformed_words[j] = [transformed_tokens[j]]
+                    else:
+                        # If there is an existing list, append the modified word if not in there already
+                        curr_options = transformed_words[j]
+                        if transformed_tokens[j] not in curr_options:
+                            curr_options.append(transformed_tokens[j])
+
+        action_to_index = {}  # maps the action index to a tuple (index in sentence, index of the word options for that index)
+        curr_action = 0
+        for index_in_sentence in original_words.keys():  # i is index in the sentence
+            num_options = transformed_words[index_in_sentence]
+            for index_in_word_options in range(num_options):  # j is the index of the word options for a particular index in the sentence
+                action_to_index[curr_action] = (index_in_sentence, index_in_word_options)
+                curr_action += 1
+
+        # Create the word candidates that will jump start the RL learning process
+        word_candidates = {}
+        for index_in_sentence, word_list in transformed_words.items():
+            word_list.sort(reverse=False) # make these alphabetical order for consistency in state space
+            word_candidates[index_in_sentence] = word_list  
 
         for i in range(self.max_length_rollout):
-            word_candidates = []
-            for j,k in enumerate(index_indicators): 
-                if curr_state[k] == original_word[j]:
-                    word_candidates.append(transformed_word[j])
-                else:
-                    word_candidates.append(original_word[j])
             
             action, probs = self.get_action(curr_state, word_candidates, indicators)
 
+            curr_state = curr_state.split(' ')
             next_state = curr_state.copy()
-            next_state[index_indicators[action]] = word_candidates[action]
+            index_in_sentence, index_of_word_list = action_to_index[action]
+
+            next_state[index_in_sentence] = word_candidates[index_in_sentence][index_of_word_list]
+
+            # Modify word candidates by reinserting the previous word and taking out the word replacement
+            word_candidates[index_in_sentence].remove(curr_state[index_in_sentence])
+            word_candidates[index_in_sentence].append(next_state[index_in_sentence])
+            word_candidates[index_in_sentence].sort(reverse=False)
 
             r = self.reward_function(curr_state, action, next_state)
 
             self.buffer.append(Transition(state=curr_state, action=action, reward=r, next_state=next_state, done=self._search_over))
+
+            curr_state = new_state
+            curr_state = " ".join(curr_state)
 
         if len(self.buffer) > self.batch_size:
             self.update()
