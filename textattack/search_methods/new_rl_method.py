@@ -25,9 +25,11 @@ class RLWordSwap(SearchMethod):
         self.lambda_logit_diff = 1
         self.lambda_search_success = 5
         self.constant_reward = -.1
-        return 
 
-    def 
+        # Cache for target model reward scores 
+        self.cache = {}  # maps sentence to score 
+        self.max_cache_size = int(1e9)
+        return 
     
     def perform_search(self, initial_result):
         # Initial result is the input 
@@ -35,7 +37,7 @@ class RLWordSwap(SearchMethod):
         original_text = initial_result.attacked_text
         curr_state = initial_result.attacked_text
 
-        transformed_texts = self.get_transformations(curr_state, original_text)
+        transformed_texts = self.get_transformations(curr_state, None)
         # Get the indices of the candidate words to switch out 
         tokens = original_text.split(' ')
         indicators = [0 for _ in range(len(tokens))]
@@ -112,13 +114,26 @@ class RLWordSwap(SearchMethod):
         action = torch.sample(probs, dim=1)
 
         return action, probs
+    
+    def get_goal_score(self, state):
+        if state in self.cache:
+            s_score = self.cache[state]
+            self.cache.pop(state)  # remove and reinsert to push it to end of ordered dictionary
+        else:
+            original_results, _ = self.get_goal_results([state])
+            s_score = original_results[0].score 
+        self.cache[state] = s_score  # insert to end of ordered dictionary 
+
+        if len(self.cache) > self.max_cache_size:
+            self.cache.popitem(last=False)  # remove the oldest entry in dictionary 
+        return s_score
 
     def reward_function(self, s, a, next_s):
         # reward an increase in the target output class on the target model 
-        original_results, _ = self.get_goal_results([s])
-        new_results, self._search_over = self.get_goal_results([next_s])
+        s_score = self.get_goal_score(s)
+        next_s_score = self.get_goal_score(next_state)
         
-        reward_logit_diff = new_results[0].score - original_results[0].score 
+        reward_logit_diff = next_s_score - s_score
         reward_success = self.lambda_search_success if self._search_over else 0
     
         return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
@@ -149,5 +164,3 @@ class RLWordSwap(SearchMethod):
 
         self.buffer = []
         return 
-
-    
