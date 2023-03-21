@@ -44,7 +44,7 @@ def words2swap(text):
     text_list = list(text.split(" "))  # split text and convert to string
     wordz = swapable_words(text_list)   # get words that should be swapped
     mask_list = []
-    for pattern in text_list:
+    for pattern in wordz:
         word_match = re.search(pattern, text)
         mask_list.append(word_match.span())
     return text_list, mask_list  # get positions of swapable words in the original text
