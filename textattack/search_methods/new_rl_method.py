@@ -71,6 +71,8 @@ class RLWordSwap(SearchMethod):
             for index_in_word_options in range(num_options):  # j is the index of the word options for a particular index in the sentence
                 action_to_index[curr_action] = (index_in_sentence, index_in_word_options)
                 curr_action += 1
+        
+        stop_action = len(action_to_index) # the last action will always correspond to stopping 
 
         # Create the word candidates that will jump start the RL learning process
         word_candidates = {}
@@ -84,16 +86,18 @@ class RLWordSwap(SearchMethod):
 
             curr_state = curr_state.split(' ')
             next_state = curr_state.copy()
-            index_in_sentence, index_of_word_list = action_to_index[action]
 
-            next_state[index_in_sentence] = word_candidates[index_in_sentence][index_of_word_list]
+            if action != stop_action:  # if we swap out a word
+                index_in_sentence, index_of_word_list = action_to_index[action]
 
-            # Modify word candidates by reinserting the previous word and taking out the word replacement
-            word_candidates[index_in_sentence].remove(curr_state[index_in_sentence])
-            word_candidates[index_in_sentence].append(next_state[index_in_sentence])
-            word_candidates[index_in_sentence].sort(reverse=False)
+                next_state[index_in_sentence] = word_candidates[index_in_sentence][index_of_word_list]
 
-            r = self.reward_function(curr_state, action, next_state)
+                # Modify word candidates by reinserting the previous word and taking out the word replacement
+                word_candidates[index_in_sentence].remove(curr_state[index_in_sentence])
+                word_candidates[index_in_sentence].append(next_state[index_in_sentence])
+                word_candidates[index_in_sentence].sort(reverse=False)
+
+            r = self.reward_function(curr_state, action, next_state, stop_action)
 
             self.buffer.append(Transition(state=curr_state, action=action, reward=r, next_state=next_state, done=self._search_over))
 
@@ -106,7 +110,6 @@ class RLWordSwap(SearchMethod):
     def get_action(self, curr_attacked_text, word_candidates, indicators):
         # curr_attacked_text is going 
 
-        # TODO: Figure out embeddings. We should let word_candidates be a list of strings but then how do we convert to embeddings? Model side of things?
         output = self.model.forward(curr_attacked_text, word_candidates, indicators)
 
         probs = torch.softmax(output)
@@ -128,13 +131,16 @@ class RLWordSwap(SearchMethod):
             self.cache.popitem(last=False)  # remove the oldest entry in dictionary 
         return s_score
 
-    def reward_function(self, s, a, next_s):
+    def reward_function(self, s, a, next_s, stop_action):
         # reward an increase in the target output class on the target model 
         s_score = self.get_goal_score(s)
         next_s_score = self.get_goal_score(next_state)
         
         reward_logit_diff = next_s_score - s_score
         reward_success = self.lambda_search_success if self._search_over else 0
+
+        if a == stop_action and not self._search_over:
+            return -self.lambda_search_success + self.constant_reward
     
         return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
 
