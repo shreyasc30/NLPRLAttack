@@ -144,7 +144,7 @@ class RLWordSwap(SearchMethod):
     
         return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
 
-    def update(self)
+    def update(self):
         # Given sequence of transitions, work backwards to calculate rewards to go for all trajectories 
         # As long as we properly account for done, we should be able to do it in one swoop 
 

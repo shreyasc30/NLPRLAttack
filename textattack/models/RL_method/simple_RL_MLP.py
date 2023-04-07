@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# me: tokenization and padding with wrapper
 class SimpleRLMLP(nn.Module):
 
     # input size is all tokens length: const. w/pad
