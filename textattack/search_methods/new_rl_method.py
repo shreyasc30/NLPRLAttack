@@ -1,9 +1,12 @@
 import numpy as np
 import torch
 from torch.nn.functional import softmax
+import collections
 
 from textattack.goal_function_results import GoalFunctionResultStatus
 from textattack.search_methods import SearchMethod
+from textattack.models.tokenizers import GloveTokenizer
+from textattack.models.RL_method import SimpleRLMLP
 
 Transition = collections.namedtuple(
     "Transition",
@@ -11,9 +14,8 @@ Transition = collections.namedtuple(
 
 
 class RLWordSwap(SearchMethod): 
-    def __init__(self, lr, gamma, batch_size, max_num_words_swap):
-
-        self.model = 
+    def __init__(self, lr, gamma, batch_size):
+        # TODO: Figure out the mebedding space
         self.buffer = []
 
         self.optimizer = torch.optim.Adam(lr=lr)
@@ -29,6 +31,13 @@ class RLWordSwap(SearchMethod):
         # Cache for target model reward scores 
         self.cache = {}  # maps sentence to score 
         self.max_cache_size = int(1e9)
+
+        # TODO: Calculate input size 
+        # Output size = action space 
+        self.tokenizer = GloveTokenizer(max_length=256)
+        self.input_size = 256
+        self.output_size = 100 + 1 # This is a dummy variable for now. +1 for stop action
+        self.model = SimpleRLMLP(self.input_size, self.output_size)
         return 
     
     def perform_search(self, initial_result):
@@ -80,11 +89,11 @@ class RLWordSwap(SearchMethod):
             word_list.sort(reverse=False) # make these alphabetical order for consistency in state space
             word_candidates[index_in_sentence] = word_list  
 
+        curr_state = curr_state.split(' ')  
         for i in range(self.max_length_rollout):
             
             action, probs = self.get_action(curr_state, word_candidates, indicators)
 
-            curr_state = curr_state.split(' ')
             next_state = curr_state.copy()
 
             if action != stop_action:  # if we swap out a word
@@ -102,21 +111,30 @@ class RLWordSwap(SearchMethod):
             self.buffer.append(Transition(state=curr_state, action=action, reward=r, next_state=next_state, done=self._search_over))
 
             curr_state = new_state
-            curr_state = " ".join(curr_state)
 
         if len(self.buffer) > self.batch_size:
             self.update()
 
     def get_action(self, curr_attacked_text, word_candidates, indicators):
-        # curr_attacked_text is going 
 
-        output = self.model.forward(curr_attacked_text, word_candidates, indicators)
+        embedding = self.create_embeddings(curr_attacked_text, word_candidates, indicators)
+
+        output = self.model.forward(embedding)
 
         probs = torch.softmax(output)
 
         action = torch.sample(probs, dim=1)
 
         return action, probs
+    
+    def create_embeddings(self, sentence_tokens, word_candidates, indicators):
+        word_candidates_sorted = [word for index, word, in sorted(word_candidates)]
+        sentence_embedding = self.tokenizer(batch_encode(sentence_tokens))
+
+        # TODO: Insert padding
+        word_candidate_embedding = self.tokenizer(word_candidates_sorted)
+        
+        return word_candidates_sorted + word_candidate_embedding + indicators
     
     def get_goal_score(self, state):
         if state in self.cache:
