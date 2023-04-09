@@ -13,9 +13,10 @@ class WordChange(Transformation):
         self.num_candidates = num_candidates
         return
 
-    def _get_transformations(self, text):
+    def _get_transformations(self, text, indices_to_modify):
+        text = text.text  # AttackText object has attribute text to access the full string
         word_dict = self.change_words(text, num_candidates=self.num_candidates)
         word_dict = self.remove_null_swaps(word_dict)
-        list_sentences_with_changes = self.compress_changed_words(word_dict, text, num_of_candidates)
+        list_sentences_with_changes = self.compress_changed_words(word_dict, text, self.num_candidates)
         return list_sentences_with_changes
 

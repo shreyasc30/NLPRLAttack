@@ -97,12 +97,12 @@ class WordChangeRLSwap(WordChange):
             # This word is not in our word embedding database, so return an empty list.
             return []
 
-    def change_words(self, text, num_of_candidates=2):
+    def change_words(self, text, num_candidates=2):
         text_list, mask_list = self.words2swap(text)
         embedding = WordEmbedding.counterfitted_GLOVE_embedding()
         word_dict = {}
         for word in text_list:
-            candidate_word_list = self.fetch_replacement_words(word, num_of_candidates, embedding)
+            candidate_word_list = self.fetch_replacement_words(word, num_candidates, embedding)
             word_dict[word] = candidate_word_list
 
         return word_dict

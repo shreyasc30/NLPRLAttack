@@ -5,7 +5,7 @@ import collections
 
 from textattack.goal_function_results import GoalFunctionResultStatus
 from textattack.search_methods import SearchMethod
-from textattack.models.tokenizers import GloveTokenizer
+from textattack.shared import WordEmbedding
 from textattack.models.RL_method import SimpleRLMLP
 
 Transition = collections.namedtuple(
@@ -17,8 +17,6 @@ class RLWordSwap(SearchMethod):
     def __init__(self, lr, gamma, batch_size):
         # TODO: Figure out the mebedding space
         self.buffer = []
-
-        self.optimizer = torch.optim.Adam(lr=lr)
 
         self.max_length_rollout = 50
         self.batch_size = batch_size
@@ -34,10 +32,11 @@ class RLWordSwap(SearchMethod):
 
         # TODO: Calculate input size 
         # Output size = action space 
-        self.tokenizer = GloveTokenizer(max_length=256)
+        self.tokenizer = WordEmbedding.counterfitted_GLOVE_embedding()
         self.input_size = 256
         self.output_size = 100 + 1 # This is a dummy variable for now. +1 for stop action
         self.model = SimpleRLMLP(self.input_size, self.output_size)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         return 
     
     def perform_search(self, initial_result):
@@ -129,10 +128,10 @@ class RLWordSwap(SearchMethod):
     
     def create_embeddings(self, sentence_tokens, word_candidates, indicators):
         word_candidates_sorted = [word for index, word, in sorted(word_candidates)]
-        sentence_embedding = self.tokenizer(batch_encode(sentence_tokens))
+        sentence_embedding = [self.tokenizer[self.tokenizer.word2index(word)] for word in sentence_tokens]
 
         # TODO: Insert padding
-        word_candidate_embedding = self.tokenizer(word_candidates_sorted)
+        word_candidate_embedding = [self.tokenizer[self.tokenizer.word2index(word)] for word in sentence_tokens]
         
         return word_candidates_sorted + word_candidate_embedding + indicators
     
@@ -161,6 +160,9 @@ class RLWordSwap(SearchMethod):
             return -self.lambda_search_success + self.constant_reward
     
         return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
+    
+    def is_black_box(self):
+        return False
 
     def update(self):
         # Given sequence of transitions, work backwards to calculate rewards to go for all trajectories 
