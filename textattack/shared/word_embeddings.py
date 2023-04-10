@@ -273,6 +273,10 @@ class WordEmbedding(AbstractWordEmbedding):
             WordEmbedding.PATH, word_embeddings_folder
         ).replace("\\", "/")
         word_embeddings_folder = utils.download_from_s3(word_embeddings_folder)
+
+        print("path", WordEmbedding.PATH)
+        # print("folder: ", word_embeddings_folder)
+        # print("file:", word_embeddings_file)
         # Concatenate folder names to create full path to files.
         word_embeddings_file = os.path.join(
             word_embeddings_folder, word_embeddings_file

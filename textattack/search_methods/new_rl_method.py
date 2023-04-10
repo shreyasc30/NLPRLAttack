@@ -5,6 +5,7 @@ import collections
 
 from textattack.goal_function_results import GoalFunctionResultStatus
 from textattack.search_methods import SearchMethod
+from textattack.models.tokenizers import GloveTokenizer
 from textattack.shared import WordEmbedding
 from textattack.models.RL_method import SimpleRLMLP
 
@@ -32,7 +33,9 @@ class RLWordSwap(SearchMethod):
 
         # TODO: Calculate input size 
         # Output size = action space 
-        self.tokenizer = WordEmbedding.counterfitted_GLOVE_embedding()
+        self.word2idx = WordEmbedding.counterfitted_GLOVE_embedding()._word2index
+        self.tokenizer = GloveTokenizer(word_id_map=self.word2idx, pad_token_id=len(self.word2idx), unk_token_id=len(self.word2idx)+1, max_length=256)
+
         self.input_size = 256
         self.output_size = 100 + 1 # This is a dummy variable for now. +1 for stop action
         self.model = SimpleRLMLP(self.input_size, self.output_size)
@@ -47,13 +50,16 @@ class RLWordSwap(SearchMethod):
 
         transformed_texts = self.get_transformations(curr_state, None)
         # Get the indices of the candidate words to switch out 
+        original_text = original_text.text
+
         tokens = original_text.split(' ')
         indicators = [0 for _ in range(len(tokens))]
         original_words = {}  # maps the index of the token in the sentence to the original token
         transformed_words = {}  # maps the index of the token in the sentence to a list of token options (including the original token)
-        for text in transformed_texts:
-            transformed_tokens = text.split(' ')
-            for j in len(tokens):
+        for attack_text_object in transformed_texts:
+            curr_text = attack_text_object.text
+            transformed_tokens = curr_text.split(' ')
+            for j in range(len(tokens)):
                 # If the original token is different from the transformed token
                 if tokens[j] != transformed_tokens[j]:
                     # Non-masked at this token because can be modified
@@ -76,7 +82,7 @@ class RLWordSwap(SearchMethod):
         curr_action = 0
         for index_in_sentence in original_words.keys():  # i is index in the sentence
             num_options = transformed_words[index_in_sentence]
-            for index_in_word_options in range(num_options):  # j is the index of the word options for a particular index in the sentence
+            for index_in_word_options in range(len(num_options)):  # j is the index of the word options for a particular index in the sentence
                 action_to_index[curr_action] = (index_in_sentence, index_in_word_options)
                 curr_action += 1
         
@@ -88,6 +94,7 @@ class RLWordSwap(SearchMethod):
             word_list.sort(reverse=False) # make these alphabetical order for consistency in state space
             word_candidates[index_in_sentence] = word_list  
 
+        curr_state = curr_state.text
         curr_state = curr_state.split(' ')  
         for i in range(self.max_length_rollout):
             
@@ -117,8 +124,7 @@ class RLWordSwap(SearchMethod):
     def get_action(self, curr_attacked_text, word_candidates, indicators):
 
         embedding = self.create_embeddings(curr_attacked_text, word_candidates, indicators)
-
-        output = self.model.forward(embedding)
+        output = self.model(torch.FloatTensor(embedding))
 
         probs = torch.softmax(output)
 
@@ -127,13 +133,35 @@ class RLWordSwap(SearchMethod):
         return action, probs
     
     def create_embeddings(self, sentence_tokens, word_candidates, indicators):
-        word_candidates_sorted = [word for index, word, in sorted(word_candidates)]
-        sentence_embedding = [self.tokenizer[self.tokenizer.word2index(word)] for word in sentence_tokens]
+        word_candidates_sorted = [list(map(lambda x: x.lower(), word_candidates[index])) for index in sorted(word_candidates.keys())]
+        word_candidates_sorted = [lst[0] for lst in word_candidates_sorted]
+        # TODO: Reconvert casing
+        """
+        sentence_embedding = []
+        for word in sentence_tokens:
+            if len(word) > 0:
+                try:
+                    sentence_embedding.append(self.tokenizer[self.tokenizer.word2index(word.lower())])
+                except KeyError:
+                    word = ''
+        """ 
+        sentence_tokens = [w.lower() for w in sentence_tokens if len(w) > 0]
+        for w in sentence_tokens:
+            if len(w) > 0:
+                try:
+                    print('manual encoding: ', self.word2idx[w])
+                    # print('tokenizer ', self.tokenizer.encode(w))
+                except KeyError:
+                    pass
+        # print('manual encoding: ', [self.word2idx[w] for w in sentence_tokens if len(w) > 0])
+        sentence_embedding = self.tokenizer.encode(' '.join(sentence_tokens))
+        # sentence_embedding = self.tokenizer.batch_encode([sentence_tokens])
 
-        # TODO: Insert padding
-        word_candidate_embedding = [self.tokenizer[self.tokenizer.word2index(word)] for word in sentence_tokens]
-        
-        return word_candidates_sorted + word_candidate_embedding + indicators
+        # TODO: Insert padding and reconvert casing
+        word_candidate_embedding = self.tokenizer.encode(' '.join(word_candidates_sorted))
+
+        return sentence_embedding + word_candidate_embedding + indicators
+
     
     def get_goal_score(self, state):
         if state in self.cache:

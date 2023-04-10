@@ -38,6 +38,7 @@ def download_from_s3(folder_name, skip_if_cached=True):
         str: path to the downloaded folder or file on disk
     """
     cache_dest_path = path_in_cache(folder_name)
+    print("CACHCE ", cache_dest_path)
     os.makedirs(os.path.dirname(cache_dest_path), exist_ok=True)
     # Use a lock to prevent concurrent downloads.
     cache_dest_lock_path = cache_dest_path + ".lock"

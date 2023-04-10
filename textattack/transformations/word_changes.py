@@ -1,4 +1,5 @@
 from textattack.transformations import Transformation
+from textattack.shared import AttackedText
 import re
 
 
@@ -18,5 +19,6 @@ class WordChange(Transformation):
         word_dict = self.change_words(text, num_candidates=self.num_candidates)
         word_dict = self.remove_null_swaps(word_dict)
         list_sentences_with_changes = self.compress_changed_words(word_dict, text, self.num_candidates)
-        return list_sentences_with_changes
+        attacked_text_list = [AttackedText(l) for l in list_sentences_with_changes]
+        return attacked_text_list
 

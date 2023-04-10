@@ -41,7 +41,7 @@ class NLPRLAttack(AttackRecipe):
     def build(model_wrapper):
         # [from correspondence with the author]
         # Candidate size K is set to 48 for all data-sets.
-        transformation = WordChangeRLSwap(num_candidates=2)# WordSwapMaskedLM(method="bert-attack", max_candidates=48)
+        transformation = WordChangeRLSwap(num_candidates=1)# WordSwapMaskedLM(method="bert-attack", max_candidates=48)
         #
         # Don't modify the same word twice or stopwords.
         #

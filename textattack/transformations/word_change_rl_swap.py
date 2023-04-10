@@ -119,9 +119,9 @@ class WordChangeRLSwap(WordChange):
         for num in range(num_of_candidates):
             text_ = text
             for key in t_dict.keys():
-                re = str(' ' + key + ' ')
+                swap_out_word = str(' ' + key + ' ')
                 subb = str(' ' + t_dict[key][num] + ' ')
-                change = re.sub(re, subb, text_)
+                change = re.sub(swap_out_word, subb, text_)
                 text_ = change
             list_sentences_with_changes.append(change)
         return list_sentences_with_changes
