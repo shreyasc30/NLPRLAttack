@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 import collections
 
-import re
+import regex as re
 import copy
 
 from textattack.goal_function_results import GoalFunctionResultStatus
@@ -16,7 +16,7 @@ from textattack.models.RL_method import SimpleRLMLP
 
 Transition = collections.namedtuple(
     "Transition",
-    "state action reward next_state done legal_actions_mask")
+    "state word_candidates action reward next_state next_word_candidates done legal_actions_mask indicators")
 
 
 class RLWordSwap(SearchMethod): 
@@ -24,7 +24,7 @@ class RLWordSwap(SearchMethod):
         # TODO: Figure out the mebedding space
         self.buffer = []
 
-        self.max_length_rollout = 500
+        self.max_length_rollout = 10
         self.batch_size = batch_size
         self.gamma = gamma 
 
@@ -35,7 +35,7 @@ class RLWordSwap(SearchMethod):
 
         # Cache for target model reward scores 
         self.cache = {}  # maps sentence to score 
-        self.max_cache_size = int(1e9)
+        self.max_cache_size = int(1e6)
 
         # TODO: Calculate input size 
         # Output size = action space 
@@ -43,8 +43,8 @@ class RLWordSwap(SearchMethod):
         self.embedding = GloveEmbeddingLayer(emb_layer_trainable=False) # GloveTokenizer(word_id_map=self.word2idx, pad_token_id=len(self.word2idx), unk_token_id=len(self.word2idx)+1, max_length=256)
 
         self.embedding_size = 200 
-        self.max_num_words_in_sentence = 25  # These two values are dummy variables for now
-        self.max_num_words_swappable_in_sentence = 25 
+        self.max_num_words_in_sentence = 50  # These two values are dummy variables for now
+        self.max_num_words_swappable_in_sentence = 50 
 
         # For MLP, the input size has 3 parts: sentence embedding, word swap embedding, and the indicators for swappable token indices
         self.input_size = self.embedding_size * (self.max_num_words_in_sentence + self.max_num_words_swappable_in_sentence) + self.max_num_words_swappable_in_sentence  
@@ -127,8 +127,11 @@ class RLWordSwap(SearchMethod):
 
         curr_state_tokens = curr_state.text.split(' ')
         state_embedding = self.create_embeddings(curr_state_tokens, word_candidates, indicators)
+        prev_word_candidates = copy.deepcopy(word_candidates)
  
+        print("Perform search...", self.max_length_rollout)
         for i in range(self.max_length_rollout):
+            print("Step: ", i)
 
             # curr_state_tokens = curr_state.text.split(' ') 
 
@@ -153,22 +156,28 @@ class RLWordSwap(SearchMethod):
             next_state_tokens = next_state.text.split(' ')
             next_state_embedding = self.create_embeddings(next_state_tokens, word_candidates, indicators)
 
-            self.buffer.append(Transition(state=state_embedding, action=action, reward=r, next_state=next_state_embedding, done=self._search_over, legal_actions_mask=legal_actions_mask))  # legal_actions_mask is same for each rollout
+            # TODO: Fix so that we store sentences
+            print(curr_state_tokens)
+            self.buffer.append(Transition(state=curr_state_tokens, word_candidates=prev_word_candidates, 
+                                          action=action, reward=r, next_state=next_state_tokens, 
+                                          next_word_candidates=word_candidates, done=self._search_over, 
+                                          legal_actions_mask=legal_actions_mask, indicators=indicators))  # legal_actions_mask is same for each rollout
 
             # Preparing all variables for next iteration
             curr_state = next_state
             curr_state_tokens = curr_state.text.split(' ') 
+            prev_word_candidates = copy.deepcopy(word_candidates)
             state_embedding = next_state_embedding 
 
 
             if action == stop_action:
                 break
-
+        print("Buffer: ", len(self.buffer))
         if len(self.buffer) > self.batch_size:
             self.update()
 
         curr_state = self.cache[curr_state.text][0]
-        print("Result returned: ", curr_state)
+
         return curr_state
         
 
@@ -271,10 +280,16 @@ class RLWordSwap(SearchMethod):
         # Given sequence of transitions, work backwards to calculate rewards to go for all trajectories 
         # As long as we properly account for done, we should be able to do it in one swoop 
 
-        state_embedding = [t.state for t in self.buffer]
+        state_embedding = []
+        next_state_embedding = []
+
+        for t in self.buffer:
+            print("state: ",  t.state)
+            state_embedding.append(self.create_embeddings(t.state, t.word_candidates, t.indicators))
+            next_state_embedding.append(self.create_embeddings(t.next_state, t.next_word_candidates, t.indicators))
+
         actions = [t.action for t in self.buffer]
         rewards = [t.reward for t in self.buffer]
-        next_state_embedding = [t.next_state for t in self.buffer]
         dones = [t.done for t in self.buffer]
         legal_actions_masks = [t.legal_actions_mask for t in self.buffer]
 

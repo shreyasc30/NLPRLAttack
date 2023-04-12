@@ -3,7 +3,9 @@
 from textattack.shared import WordEmbedding
 from textattack.transformations import WordChange
 
-import re
+# import re
+
+import regex as re
 
 
 class WordChangeRLSwap(WordChange):
@@ -61,13 +63,13 @@ class WordChangeRLSwap(WordChange):
         # input = original text
         # output= original text, indices of swapable words in text
 
-        text_list = list(text.split(" "))  # split text and convert to string
+        text_list = list(text.replace('\\', ' ').split(" "))  # split text and convert to string
         wordz = self.swapable_words(text_list)  # get words that should be swapped
 
         mask_list = []
         for pattern in list(wordz):
             word_match = re.search(pattern, text)
-            mask_list.append(word_match.span())
+            mask_list.append(word_match.span() if word_match is not None else None)
         return list(wordz), mask_list  # get positions of swapable words in the original text
 
     def recover_word_case(self, word, reference_word):
