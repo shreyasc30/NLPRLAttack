@@ -178,7 +178,7 @@ class RLWordSwap(SearchMethod):
 
             if action == stop_action:
                 break
-        print("Buffer: ", len(self.buffer))
+
         if len(self.buffer) > self.batch_size:
             self.update()
 
