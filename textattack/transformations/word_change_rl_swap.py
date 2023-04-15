@@ -59,12 +59,6 @@ class WordChangeRLSwap(WordChange):
         words = set(text_list) - stopwords
         return words
 
-    def process_text(self, text):
-        
-        new_text_list = list(text.replace('\\', ' ').replace('[','').replace(']',' ').replace('(',' ').replace(')',' ').split(" "))
-        processed_text = ' '.join(new_text_list)
-        return processed_text
-
     def words2swap(self, processed_text):
         # input = original text
         # output= original text, indices of swapable words in text

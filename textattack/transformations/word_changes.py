@@ -2,6 +2,13 @@ from textattack.transformations import Transformation
 from textattack.shared import AttackedText
 import re
 
+def process_text(text):
+    
+    new_text_list = list(text.replace('\\', ' ').replace('[','').replace(']',' ').replace('(',' ').replace(')',' ').split(" "))
+    processed_text = ' '.join(new_text_list)
+    return processed_text
+
+
 
 class WordChange(Transformation):
     """An abstract class that takes a sentence and transforms it by replacing several words with synonyms
@@ -16,7 +23,7 @@ class WordChange(Transformation):
 
     def _get_transformations(self, text, indices_to_modify):
         text = text.text  # AttackText object has attribute text to access the full string
-        text = self.process_text(text)
+        text = process_text(text)
         word_dict = self.change_words(text, num_candidates=self.num_candidates)
         word_dict = self.remove_null_swaps(word_dict)
         list_sentences_with_changes = self.compress_changed_words(word_dict, text, self.num_candidates)

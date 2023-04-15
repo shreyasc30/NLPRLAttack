@@ -14,6 +14,8 @@ from textattack.models.helpers import GloveEmbeddingLayer
 from textattack.shared import WordEmbedding
 from textattack.models.RL_method import RLWrapper
 
+from textattack.transformations.word_changes import process_text
+
 Transition = collections.namedtuple(
     "Transition",
     "state word_candidates action reward next_state next_word_candidates done legal_actions_mask indicators")
@@ -43,8 +45,8 @@ class RLWordSwap(SearchMethod):
         self.embedding = GloveEmbeddingLayer(emb_layer_trainable=False) # GloveTokenizer(word_id_map=self.word2idx, pad_token_id=len(self.word2idx), unk_token_id=len(self.word2idx)+1, max_length=256)
 
         self.embedding_size = 200 
-        self.max_num_words_in_sentence = 80  # These two values are dummy variables for now
-        self.max_num_words_swappable_in_sentence = 30
+        self.max_num_words_in_sentence = 137  # These two values are manually inputed values based on the dataset
+        self.max_num_words_swappable_in_sentence = 61
 
         # For MLP, the input size has 3 parts: sentence embedding, word swap embedding, and the indicators for swappable token indices
         # self.input_size = self.embedding_size * (self.max_num_words_in_sentence + self.max_num_words_swappable_in_sentence) + self.max_num_words_swappable_in_sentence  
@@ -73,19 +75,20 @@ class RLWordSwap(SearchMethod):
         original_text = self.take_out_extra_spaces(original_text.text) 
         edited_attacked_text = AttackedText(original_text)
 
-        self.max_sentence_length = max(self.max_sentence_length, len(original_text.split(' ')))
+        self.max_sentence_length = max(self.max_sentence_length, len(edited_attacked_text.words))
         # return curr_state
         
         transformed_texts = self.get_transformations(edited_attacked_text, None)
+        original_text = process_text(original_text)
         # Get the indices of the candidate words to switch out 
 
-        tokens = original_text.split(' ')
+        tokens = edited_attacked_text.words
         indicators = [0 for _ in range(len(tokens))]
         original_words = {}  # maps the index of the token in the sentence to the original token
         transformed_words = {}  # maps the index of the token in the sentence to a list of token options (including the original token)
         for attack_text_object in transformed_texts:
-            curr_text = attack_text_object.text
-            transformed_tokens = curr_text.split(' ')
+            # curr_text = attack_text_object.text
+            transformed_tokens = attack_text_object.words
             assert len(tokens) == len(transformed_tokens)
             for j in range(len(tokens)):
                 # If the original token is different from the transformed token
@@ -128,16 +131,14 @@ class RLWordSwap(SearchMethod):
             word_list.sort(reverse=False) # make these alphabetical order for consistency in state space
             word_candidates[index_in_sentence] = word_list  
 
-        curr_state_string = self.take_out_extra_spaces(curr_state.attacked_text.text) 
-        curr_state = AttackedText(curr_state_string)
+        curr_state = AttackedText(original_text)
+        print("Num word candidates: ", len(word_candidates), "     Length sentence tokens: ", len(curr_state.words), flush=True)
 
-        curr_state_tokens = curr_state.text.split(' ')
+        curr_state_tokens = curr_state.words
         sentence_embedding, word_embedding, indicator_embedding = self.create_embeddings(curr_state_tokens, word_candidates, indicators)
         prev_word_candidates = copy.deepcopy(word_candidates)
  
         for i in range(self.max_length_rollout):
-
-            # curr_state_tokens = curr_state.text.split(' ') 
 
             # action, probs, state_embedding = self.get_action(curr_state_tokens, word_candidates, indicators, legal_actions_mask)
 
@@ -157,7 +158,7 @@ class RLWordSwap(SearchMethod):
 
             r = self.reward_function(curr_state, action, next_state, stop_action)
 
-            next_state_tokens = next_state.text.split(' ')
+            next_state_tokens = next_state.words
             next_sentence_embedding, next_word_embedding, next_indicator_embedding = self.create_embeddings(next_state_tokens, word_candidates, indicators)
 
             # TODO: Fix so that we store sentences
@@ -168,7 +169,7 @@ class RLWordSwap(SearchMethod):
 
             # Preparing all variables for next iteration
             curr_state = next_state
-            curr_state_tokens = curr_state.text.split(' ') 
+            curr_state_tokens = curr_state.words
             prev_word_candidates = copy.deepcopy(word_candidates)
 
             sentence_embedding = next_sentence_embedding
