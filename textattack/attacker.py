@@ -157,7 +157,7 @@ class Attacker:
         sample_exhaustion_warned = False
 
         # TODO: Insert training loop here: 
-        training_epochs = 500
+        training_epochs = 200
         print("\nEntering training loop...")
         for i in range(training_epochs): 
             worklist_copy = worklist.copy()

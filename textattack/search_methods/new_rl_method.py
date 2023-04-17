@@ -31,22 +31,22 @@ class RLWordSwap(SearchMethod):
         self.gamma = gamma
 
         # DQN Parameters
-        self.max_length_rollout = 500
-        self.min_steps_warm_up = 2000
-        self.update_target_every = 1000
+        self.max_length_rollout = 250
+        self.min_steps_warm_up = 500000
+        self.update_target_every = 5000
         self.max_buffer_size = 1e6
         self.updates_so_far = 0
 
         # Exploration Parameters
-        self.epsilon_init = .4
+        self.epsilon_init = 1
         self.epsilon_final = .1
         self.epsilon = self.epsilon_init
-        self.epsilon_num_steps = 20000
+        self.epsilon_num_steps = 5e5
 
         # Hyperparameters for reward function 
         self.lambda_logit_diff = 100
         self.lambda_search_success = 10
-        self.constant_reward = -.01
+        self.constant_reward = -.02
 
         # Cache for target model reward scores 
         self.cache = {}  # maps sentence to score 
@@ -65,9 +65,9 @@ class RLWordSwap(SearchMethod):
         # self.input_size = self.embedding_size * (self.max_num_words_in_sentence + self.max_num_words_swappable_in_sentence) + self.max_num_words_swappable_in_sentence  
         self.num_actions = self.max_num_words_swappable_in_sentence + 1 #  +1 for stop action
         self.model = RLWrapper(embedding_dim=self.embedding_size,
-                                hidden_dim_lstm=64,
+                                hidden_dim_lstm=128,
                                 num_hidden_layers_lstm=1,
-                                lstm_out_size=128,
+                                lstm_out_size=200,
                                 output_size=self.num_actions,
                                 max_length_sentence=self.max_num_words_in_sentence,
                                 max_swappable_words=self.max_num_words_swappable_in_sentence)# SimpleRLLSTM(self.input_size, self.num_actions)
@@ -204,8 +204,6 @@ class RLWordSwap(SearchMethod):
             word_embedding = next_word_embedding
             indicator_embedding = next_indicator_embedding
 
-            self.epsilon = max(self.epsilon_final, self.epsilon - ((self.epsilon_init - self.epsilon_final) / self.epsilon_num_steps))
-
             if self._search_over and action != stop_action:  # if found adversarial example and was not intentional, finish up the episode 
                 # Insert to buffer the transition corresponding to stop action
                 next_state_tokens = AttackedText(curr_state.text).words 
@@ -223,8 +221,12 @@ class RLWordSwap(SearchMethod):
 
 
             # print("Buffer Size: ", len(self.buffer))
-            if len(self.buffer) > self.min_steps_warm_up:
+            if len(self.buffer) >= self.min_steps_warm_up:
+                if len(self.buffer) == self.min_steps_warm_up:
+                    print("Beginning training")
                 self.update_dqn()
+                self.epsilon = max(self.epsilon_final, self.epsilon - ((self.epsilon_init - self.epsilon_final) / self.epsilon_num_steps))
+
             
             if len(self.buffer) > self.max_buffer_size:
                 self.buffer = self.buffer[-self.max_buffer_size:]
