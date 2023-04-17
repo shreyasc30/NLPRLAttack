@@ -58,6 +58,6 @@ class NLPRLAttack(AttackRecipe):
         # is the sentence after replacing wi with [MASK]. Then we rank all the words
         # according to the ranking score Iwi in descending order to create word list
         # L."
-        search_method = RLWordSwap(lr=3e-4, gamma=.99, batch_size=4)
+        search_method = RLWordSwap(lr=3e-4, gamma=.99, batch_size=256)
 
         return Attack(goal_function, constraints, transformation, search_method)

@@ -14,6 +14,8 @@ from textattack.models.helpers import GloveEmbeddingLayer
 from textattack.shared import WordEmbedding
 from textattack.models.RL_method import RLWrapper
 
+from textattack.shared import utils
+
 from textattack.transformations.word_changes import process_text
 
 Transition = collections.namedtuple(
@@ -25,15 +27,26 @@ class RLWordSwap(SearchMethod):
     def __init__(self, lr, gamma, batch_size):
         # TODO: Figure out the mebedding space
         self.buffer = []
-
-        self.max_length_rollout = 10
         self.batch_size = batch_size
-        self.gamma = gamma 
+        self.gamma = gamma
+
+        # DQN Parameters
+        self.max_length_rollout = 500
+        self.min_steps_warm_up = 2000
+        self.update_target_every = 1000
+        self.max_buffer_size = 1e6
+        self.updates_so_far = 0
+
+        # Exploration Parameters
+        self.epsilon_init = .4
+        self.epsilon_final = .1
+        self.epsilon = self.epsilon_init
+        self.epsilon_num_steps = 20000
 
         # Hyperparameters for reward function 
-        self.lambda_logit_diff = 1
-        self.lambda_search_success = 5
-        self.constant_reward = -.1
+        self.lambda_logit_diff = 100
+        self.lambda_search_success = 10
+        self.constant_reward = -.01
 
         # Cache for target model reward scores 
         self.cache = {}  # maps sentence to score 
@@ -45,8 +58,8 @@ class RLWordSwap(SearchMethod):
         self.embedding = GloveEmbeddingLayer(emb_layer_trainable=False) # GloveTokenizer(word_id_map=self.word2idx, pad_token_id=len(self.word2idx), unk_token_id=len(self.word2idx)+1, max_length=256)
 
         self.embedding_size = 200 
-        self.max_num_words_in_sentence = 137  # These two values are manually inputed values based on the dataset
-        self.max_num_words_swappable_in_sentence = 61
+        self.max_num_words_in_sentence = 137 # 137  # These two values are manually inputed values based on the dataset
+        self.max_num_words_swappable_in_sentence = 61 # 61
 
         # For MLP, the input size has 3 parts: sentence embedding, word swap embedding, and the indicators for swappable token indices
         # self.input_size = self.embedding_size * (self.max_num_words_in_sentence + self.max_num_words_swappable_in_sentence) + self.max_num_words_swappable_in_sentence  
@@ -58,9 +71,21 @@ class RLWordSwap(SearchMethod):
                                 output_size=self.num_actions,
                                 max_length_sentence=self.max_num_words_in_sentence,
                                 max_swappable_words=self.max_num_words_swappable_in_sentence)# SimpleRLLSTM(self.input_size, self.num_actions)
+        
+        self.target_model = RLWrapper(embedding_dim=self.embedding_size,
+                                hidden_dim_lstm=64,
+                                num_hidden_layers_lstm=1,
+                                lstm_out_size=128,
+                                output_size=self.num_actions,
+                                max_length_sentence=self.max_num_words_in_sentence,
+                                max_swappable_words=self.max_num_words_swappable_in_sentence)
+        
+        self.model.to(utils.device)
+        self.target_model.to(utils.device)
+
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
-        self.max_sentence_length = 0
+        self.episode_returns = []
         return 
 
     def take_out_extra_spaces(self, sentence):
@@ -74,9 +99,6 @@ class RLWordSwap(SearchMethod):
 
         original_text = self.take_out_extra_spaces(original_text.text) 
         edited_attacked_text = AttackedText(original_text)
-
-        self.max_sentence_length = max(self.max_sentence_length, len(edited_attacked_text.words))
-        # return curr_state
         
         transformed_texts = self.get_transformations(edited_attacked_text, None)
         original_text = process_text(original_text)
@@ -132,12 +154,13 @@ class RLWordSwap(SearchMethod):
             word_candidates[index_in_sentence] = word_list  
 
         curr_state = AttackedText(original_text)
-        print("Num word candidates: ", len(word_candidates), "     Length sentence tokens: ", len(curr_state.words), flush=True)
+        # print("Num word candidates: ", len(word_candidates), "     Length sentence tokens: ", len(curr_state.words), flush=True)
 
         curr_state_tokens = curr_state.words
         sentence_embedding, word_embedding, indicator_embedding = self.create_embeddings(curr_state_tokens, word_candidates, indicators)
         prev_word_candidates = copy.deepcopy(word_candidates)
  
+        rollout_reward = 0
         for i in range(self.max_length_rollout):
 
             # action, probs, state_embedding = self.get_action(curr_state_tokens, word_candidates, indicators, legal_actions_mask)
@@ -155,16 +178,21 @@ class RLWordSwap(SearchMethod):
                 word_candidates[index_in_sentence].sort(reverse=False)
 
                 next_state = curr_state.replace_word_at_index(index_in_sentence, word_to_replace_with)
+            
+            else:
+                next_state = AttackedText(curr_state.text)
 
             r = self.reward_function(curr_state, action, next_state, stop_action)
+            if self._search_over:
+                print("Search over", self._search_over, "   Reward: ", r)
+            rollout_reward += r
 
             next_state_tokens = next_state.words
             next_sentence_embedding, next_word_embedding, next_indicator_embedding = self.create_embeddings(next_state_tokens, word_candidates, indicators)
 
-            # TODO: Fix so that we store sentences
             self.buffer.append(Transition(state=curr_state_tokens, word_candidates=prev_word_candidates, 
                                           action=action, reward=r, next_state=next_state_tokens, 
-                                          next_word_candidates=word_candidates, done=self._search_over, 
+                                          next_word_candidates=word_candidates, done=int(action == stop_action), 
                                           legal_actions_mask=legal_actions_mask, indicators=indicators))  # legal_actions_mask is same for each rollout
 
             # Preparing all variables for next iteration
@@ -176,24 +204,68 @@ class RLWordSwap(SearchMethod):
             word_embedding = next_word_embedding
             indicator_embedding = next_indicator_embedding
 
+            self.epsilon = max(self.epsilon_final, self.epsilon - ((self.epsilon_init - self.epsilon_final) / self.epsilon_num_steps))
+
+            if self._search_over and action != stop_action:  # if found adversarial example and was not intentional, finish up the episode 
+                # Insert to buffer the transition corresponding to stop action
+                next_state_tokens = AttackedText(curr_state.text).words 
+                self.buffer.append(Transition(state=curr_state_tokens, word_candidates=prev_word_candidates,
+                                              action=stop_action, reward=self.lambda_search_success, next_state=next_state_tokens, 
+                                              next_word_candidates=word_candidates, done=1, 
+                                              legal_actions_mask=legal_actions_mask, indicators=indicators))
+                rollout_reward += self.lambda_search_success
+                print("SEARCH OVER! ", self._search_over, "   Adding extra action to list")
+                print(curr_state)
+                break
 
             if action == stop_action:
                 break
 
-        if len(self.buffer) > self.batch_size:
-            self.update()
 
-        curr_state = self.cache[curr_state.text][0]
+            # print("Buffer Size: ", len(self.buffer))
+            if len(self.buffer) > self.min_steps_warm_up:
+                self.update_dqn()
+            
+            if len(self.buffer) > self.max_buffer_size:
+                self.buffer = self.buffer[-self.max_buffer_size:]
+        
+        self.episode_returns.append(rollout_reward)
+        
+        if len(self.episode_returns) % 10 == 0:
+            print("Average returns past 10 rollouts: ", sum(self.episode_returns[-10:]) / 10, flush=True)
+            print("New epsilon value: ", self.epsilon)
+
+        curr_state = self.cache[curr_state.text][0][0]
 
         return curr_state
         
 
     def get_action(self, sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask):
+        """
         probs = self.get_action_probs(sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask)
+        probs[0, legal_actions_mask] = (1 - self.epsilon) * probs[0, legal_actions_mask]
+        probs[0, legal_actions_mask] += self.epsilon / sum(legal_actions_mask)
 
         # Remember to insert the additional action at the very END corresponding to stop action
         action = probs.multinomial(num_samples=1, replacement=False)[0].item()
+        """
+        
+        output = self.model(sentence_embedding.unsqueeze(0), word_embedding.unsqueeze(0), torch.unsqueeze(indicator_embedding, 0))
 
+
+        if np.random.random() < self.epsilon:
+            probs = np.array(legal_actions_mask) / sum(legal_actions_mask)
+            action = np.random.choice(probs.shape[0], p=probs)
+            probs = np.zeros(len(legal_actions_mask))
+            probs[action] = 1
+        else:
+            probs = torch.zeros(output.size()[1])
+            illegal_action_indicator = [i for i, indicator in enumerate(legal_actions_mask) if indicator == 0]
+            output[0, illegal_action_indicator] = -1e9
+            action = int(torch.argmax(output, dim=1)[0].item())
+            probs[action] = 1
+        
+ 
         return action, probs
 
     def get_action_probs(self, sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask):
@@ -218,8 +290,6 @@ class RLWordSwap(SearchMethod):
 
         return probs
 
-
-
     def query_word_to_id(self, word):
         try:
             return self.embedding.word2id[word.lower()]
@@ -237,18 +307,18 @@ class RLWordSwap(SearchMethod):
         num_pad_tokens = max(self.max_num_words_in_sentence - len(sentence_embedding_ids), 0)
         sentence_embedding_ids = sentence_embedding_ids + ([self.embedding.padid] * num_pad_tokens)
 
-        sentence_embedding = self.embedding(torch.tensor(sentence_embedding_ids, dtype=torch.int32))
+        sentence_embedding = self.embedding(torch.tensor(sentence_embedding_ids, dtype=torch.int32).to(utils.device))
 
         assert not any([len(w) == 0 for w in word_candidates_sorted])
         word_candidate_ids = [self.query_word_to_id(w) for w in word_candidates_sorted]
         num_pad_tokens = max(self.max_num_words_swappable_in_sentence - len(word_candidate_ids), 0)
         word_candidate_ids = word_candidate_ids + ([self.embedding.padid] * num_pad_tokens)
 
-        word_candidate_embedding = self.embedding(torch.tensor(word_candidate_ids, dtype=torch.int32))
+        word_candidate_embedding = self.embedding(torch.tensor(word_candidate_ids, dtype=torch.int32).to(utils.device))
 
         # result = torch.concat([torch.flatten(sentence_embedding), torch.flatten(word_candidate_embedding), torch.Tensor(indicators)])
 
-        return sentence_embedding, word_candidate_embedding, torch.Tensor(indicators)
+        return sentence_embedding, word_candidate_embedding, torch.Tensor(indicators).to(utils.device)
 
     
     def get_goal_result_wrapper(self, state):
@@ -257,8 +327,8 @@ class RLWordSwap(SearchMethod):
             goal_result = self.cache[state.text]
             self.cache.pop(state.text)  # remove and reinsert to push it to end of ordered dictionary
         else:
-            goal_result, _ = self.get_goal_results([state])
-            s_score = goal_result[0].score 
+            goal_result = self.get_goal_results([state])
+            # s_score = goal_result[0].score 
         self.cache[state.text] = goal_result  # insert to end of ordered dictionary 
 
         if len(self.cache) > self.max_cache_size:
@@ -267,17 +337,23 @@ class RLWordSwap(SearchMethod):
 
     def reward_function(self, s, a, next_s, stop_action):
         # reward an increase in the target output class on the target model 
-        s_goal_result = self.get_goal_result_wrapper(s)
-        next_s_goal_result = self.get_goal_result_wrapper(next_s)
+        s_goal_result, _ = self.get_goal_result_wrapper(s)
+        next_s_goal_result, status = self.get_goal_result_wrapper(next_s)
 
         s_score = s_goal_result[0].score 
         next_s_score = next_s_goal_result[0].score
+
+        self._search_over = next_s_goal_result[0].goal_status == GoalFunctionResultStatus.SUCCEEDED
+        # print("SEARCH OVER? ", self._search_over, status, next_s_goal_result[0].goal_status, GoalFunctionResultStatus.SUCCEEDED)
+
         
         reward_logit_diff = next_s_score - s_score
-        reward_success = self.lambda_search_success if self._search_over else 0
+        reward_success = self.lambda_search_success if self._search_over and a == stop_action else 0  # only give the success if it was successful and intentional
 
         if a == stop_action and not self._search_over:
-            return -self.lambda_search_success + self.constant_reward
+            return self.constant_reward
+
+        # print("rewards: ", self.lambda_logit_diff * reward_logit_diff)
     
         return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
     
@@ -316,15 +392,18 @@ class RLWordSwap(SearchMethod):
         rtg = [0 for _ in range(len(self.buffer) + 1)]
         b = np.mean(rewards)
         for i in range(len(self.buffer) - 1, -1, -1):
-            rtg[i] = (rewards[i] - b) + self.gamma * rtg[i+1] * (1 - dones[i])
+            rtg[i] = (rewards[i]) + self.gamma * rtg[i+1] * (1 - dones[i])
         rtg = rtg[:-1]
+
+        rtg = rtg - np.mean(rtg)
 
         action_probs = self.get_action_probs(torch.stack(sentence_embedding), torch.stack(word_embedding), torch.stack(indicator_embedding), torch.FloatTensor(legal_actions_masks))
 
         selected_action_probs = torch.gather(action_probs, 1, torch.reshape(torch.tensor(actions), (-1, 1)))
 
         # Use actions to query gather from action_probs
-        loss = -torch.mean(torch.log(selected_action_probs) * torch.tensor(rtg, dtype=torch.float32))
+        # print("Sizes: ", (torch.log(selected_action_probs) * torch.tensor(rtg, dtype=torch.float32).unsqueeze(1)).size())
+        loss = -torch.mean(torch.log(selected_action_probs) * torch.tensor(rtg, dtype=torch.float32).unsqueeze(1))
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -334,3 +413,71 @@ class RLWordSwap(SearchMethod):
 
         self.buffer = []
         return 
+
+    def update_target(self):
+        for target_param, local_param in zip(self.target_model.parameters(), self.model.parameters()):
+            target_param.data.copy_(local_param.data)
+
+    def update_dqn(self):
+        sentence_embedding = []
+        word_embedding = []
+        indicator_embedding = []
+
+        next_sentence_embedding = []
+        next_word_embedding = []
+        next_indicator_embedding = []
+
+        idx = np.random.choice(len(self.buffer), self.batch_size)
+
+        for i in idx:
+            t = self.buffer[i]
+            curr_sentence_embedding, curr_word_embedding, curr_indicator_embedding = self.create_embeddings(t.state, t.word_candidates, t.indicators)
+            sentence_embedding.append(curr_sentence_embedding)
+            word_embedding.append(curr_word_embedding)
+            indicator_embedding.append(curr_indicator_embedding)
+            
+            curr_sentence_embedding, curr_word_embedding, curr_indicator_embedding = self.create_embeddings(t.next_state, t.next_word_candidates, t.indicators)
+            next_sentence_embedding.append(curr_sentence_embedding)
+            next_word_embedding.append(curr_word_embedding)
+            next_indicator_embedding.append(curr_indicator_embedding)
+            
+        actions = [self.buffer[i].action for i in idx]
+        rewards = [self.buffer[i].reward for i in idx]
+        dones = [self.buffer[i].done for i in idx]
+        legal_actions_masks = torch.tensor([self.buffer[i].legal_actions_mask for i in idx]).to(utils.device)
+
+        q_values = self.model(torch.stack(sentence_embedding), torch.stack(word_embedding), torch.stack(indicator_embedding))
+        q_values_chosen = torch.gather(q_values, 1, torch.tensor(actions).to(utils.device).unsqueeze(1))
+
+        next_q_values_target = self.target_model(torch.stack(next_sentence_embedding), torch.stack(next_word_embedding), torch.stack(next_indicator_embedding))
+
+        q_values_next = self.model(torch.stack(next_sentence_embedding), torch.stack(next_word_embedding), torch.stack(next_indicator_embedding)).detach()
+        filtered_q_values_next = torch.where(legal_actions_masks == 1, q_values_next, -1e9)
+        next_a = torch.argmax(filtered_q_values_next, dim=1)
+        
+        # filtered_next_q_values = torch.where(legal_actions_masks == 1, next_q_values_target, -1e9)
+        # next_max_q_values = torch.max(filtered_next_q_values, dim=1)[0]
+
+        next_max_q_values = torch.gather(next_q_values_target, 1, next_a.unsqueeze(1)).squeeze()
+
+        # print(next_a.unsqueeze(1).size(), next_q_values_target.size(), next_max_q_values.size(), torch.tensor(rewards).size())
+        assert torch.tensor(rewards).size() == next_max_q_values.size()
+        target = torch.tensor(rewards).to(utils.device) + self.gamma * next_max_q_values 
+        target = target.unsqueeze(1)
+
+        loss_function = torch.nn.MSELoss()
+        target.detach()
+
+        assert q_values_chosen.size() == target.size()
+        loss = loss_function(q_values_chosen, target)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        # print("DQN loss: ", loss)
+
+        self.updates_so_far += 1
+        if self.updates_so_far % self.update_target_every == 0:
+            self.update_target()
+
