@@ -34,7 +34,7 @@ class RLWordSwap(SearchMethod):
         self.max_length_rollout = 250
         self.min_steps_warm_up = 200000
         self.update_target_every = 5000
-        self.max_buffer_size = 1e6
+        self.max_buffer_size = 3e5
         self.updates_so_far = 0
 
         # Exploration Parameters
