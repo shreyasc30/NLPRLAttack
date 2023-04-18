@@ -20,7 +20,7 @@ from textattack.constraints import Constraint, PreTransformationConstraint
 from textattack.goal_function_results import GoalFunctionResultStatus
 from textattack.goal_functions import GoalFunction
 from textattack.models.wrappers import ModelWrapper
-from textattack.search_methods import SearchMethod
+from textattack.search_methods import SearchMethod, RLWordSwap
 from textattack.shared import AttackedText, utils
 from textattack.transformations import CompositeTransformation, Transformation
 
@@ -382,7 +382,7 @@ class Attack:
         filtered_texts.sort(key=lambda t: t.text)
         return filtered_texts
 
-    def _attack(self, initial_result):
+    def _attack(self, initial_result, is_evaluation):
         """Calls the ``SearchMethod`` to perturb the ``AttackedText`` stored in
         ``initial_result``.
 
@@ -393,7 +393,10 @@ class Attack:
             A ``SuccessfulAttackResult``, ``FailedAttackResult``,
                 or ``MaximizedAttackResult``.
         """
-        final_result = self.search_method(initial_result)
+        if isinstance(self.search_method, RLWordSwap):
+            final_result = self.search_method(initial_result, is_evaluation)
+        else:
+            final_result = self.search_method(initial_result)
         self.clear_cache()
         if final_result.goal_status == GoalFunctionResultStatus.SUCCEEDED:
             result = SuccessfulAttackResult(
@@ -414,7 +417,7 @@ class Attack:
             raise ValueError(f"Unrecognized goal status {final_result.goal_status}")
         return result
 
-    def attack(self, example, ground_truth_output):
+    def attack(self, example, ground_truth_output, is_evaluation=True):
         """Attack a single example.
 
         Args:
@@ -445,7 +448,7 @@ class Attack:
         if goal_function_result.goal_status == GoalFunctionResultStatus.SKIPPED:
             return SkippedAttackResult(goal_function_result)
         else:
-            result = self._attack(goal_function_result)
+            result = self._attack(goal_function_result, is_evaluation)
             return result
 
     def __repr__(self):

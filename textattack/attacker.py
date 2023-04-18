@@ -22,6 +22,7 @@ from textattack.attack_results import (
     SuccessfulAttackResult,
 )
 from textattack.shared.utils import logger
+from textattack.search_methods import RLWordSwap
 
 from .attack import Attack
 from .attack_args import AttackArgs
@@ -157,29 +158,30 @@ class Attacker:
         sample_exhaustion_warned = False
 
         # TODO: Insert training loop here: 
-        training_epochs = 200
-        print("\nEntering training loop...")
-        for i in range(training_epochs): 
-            worklist_copy = worklist.copy()
-            example_count = 0
-            success_count = 0
-            while worklist_copy:
-                idx = worklist_copy.popleft()
-                try: 
-                    example, ground_truth_output = self.dataset[idx]
-                except IndexError:
-                    continue
-                example = textattack.shared.AttackedText(example)
-                if self.dataset.label_names is not None:
-                    example.attack_attrs["label_names"] = self.dataset.label_names 
-                try:
-                    result = self.attack.attack(example, ground_truth_output)
-                    success_count += 1 if isinstance(result, SuccessfulAttackResult) else 0
-                except Exception as e:
-                    raise e
-                example_count += 1
+        training_epochs = 350
+        if isinstance(self.attack.search_method, RLWordSwap):
+            print("\nEntering training loop...")
+            for i in range(training_epochs): 
+                worklist_copy = worklist.copy()
+                example_count = 0
+                success_count = 0 
+                while worklist_copy:
+                    idx = worklist_copy.popleft()
+                    try: 
+                        example, ground_truth_output = self.dataset[idx]
+                    except IndexError:
+                        continue
+                    example = textattack.shared.AttackedText(example)
+                    if self.dataset.label_names is not None:
+                        example.attack_attrs["label_names"] = self.dataset.label_names 
+                    try:
+                        result = self.attack.attack(example, ground_truth_output, is_evaluation=False)
+                        success_count += 1 if isinstance(result, SuccessfulAttackResult) else 0
+                    except Exception as e:
+                        raise e
+                    example_count += 1
 
-            print("\nEpoch: {} success rate: {}".format(i, success_count / float(example_count)), flush=True)
+                print("\nEpoch: {} success rate: {}".format(i, success_count / float(example_count)), flush=True)
 
         while worklist:
             idx = worklist.popleft()

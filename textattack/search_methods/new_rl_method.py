@@ -32,7 +32,7 @@ class RLWordSwap(SearchMethod):
 
         # DQN Parameters
         self.max_length_rollout = 250
-        self.min_steps_warm_up = 500000
+        self.min_steps_warm_up = 200000
         self.update_target_every = 5000
         self.max_buffer_size = 1e6
         self.updates_so_far = 0
@@ -41,7 +41,7 @@ class RLWordSwap(SearchMethod):
         self.epsilon_init = 1
         self.epsilon_final = .1
         self.epsilon = self.epsilon_init
-        self.epsilon_num_steps = 5e5
+        self.epsilon_num_steps = 200000
 
         # Hyperparameters for reward function 
         self.lambda_logit_diff = 100
@@ -73,9 +73,9 @@ class RLWordSwap(SearchMethod):
                                 max_swappable_words=self.max_num_words_swappable_in_sentence)# SimpleRLLSTM(self.input_size, self.num_actions)
         
         self.target_model = RLWrapper(embedding_dim=self.embedding_size,
-                                hidden_dim_lstm=64,
+                                hidden_dim_lstm=128,
                                 num_hidden_layers_lstm=1,
-                                lstm_out_size=128,
+                                lstm_out_size=200,
                                 output_size=self.num_actions,
                                 max_length_sentence=self.max_num_words_in_sentence,
                                 max_swappable_words=self.max_num_words_swappable_in_sentence)
@@ -90,8 +90,30 @@ class RLWordSwap(SearchMethod):
 
     def take_out_extra_spaces(self, sentence):
         return re.sub(' +', ' ', sentence)
+
+    # Overwriting parent method __call__ to support getting is_evaluation
+    def __call__(self, initial_result, is_evaluation=True):
+        """Ensures access to necessary functions, then calls
+        ``perform_search``"""
+        if not hasattr(self, "get_transformations"):
+            raise AttributeError(
+                "Search Method must have access to get_transformations method"
+            )
+        if not hasattr(self, "get_goal_results"):
+            raise AttributeError(
+                "Search Method must have access to get_goal_results method"
+            )
+        if not hasattr(self, "filter_transformations"):
+            raise AttributeError(
+                "Search Method must have access to filter_transformations method"
+            )
+
+        result = self.perform_search(initial_result, is_evaluation)
+        # ensure that the number of queries for this GoalFunctionResult is up-to-date
+        result.num_queries = self.goal_function.num_queries
+        return result
     
-    def perform_search(self, initial_result):
+    def perform_search(self, initial_result, is_evaluation=True):
         # Initial result is the input 
         self._search_over = False 
         original_text = initial_result.attacked_text
@@ -165,7 +187,7 @@ class RLWordSwap(SearchMethod):
 
             # action, probs, state_embedding = self.get_action(curr_state_tokens, word_candidates, indicators, legal_actions_mask)
 
-            action, probs = self.get_action(sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask)
+            action, probs = self.get_action(sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask, is_evaluation)
 
             if action != stop_action:  # if we swap out a word
                 index_in_sentence, index_of_word_list = action_to_index[action]
@@ -183,17 +205,19 @@ class RLWordSwap(SearchMethod):
                 next_state = AttackedText(curr_state.text)
 
             r = self.reward_function(curr_state, action, next_state, stop_action)
-            if self._search_over:
-                print("Search over", self._search_over, "   Reward: ", r)
+            # if self._search_over:
+            #     print("Search over", self._search_over, "   Reward: ", r)
             rollout_reward += r
 
             next_state_tokens = next_state.words
             next_sentence_embedding, next_word_embedding, next_indicator_embedding = self.create_embeddings(next_state_tokens, word_candidates, indicators)
 
-            self.buffer.append(Transition(state=curr_state_tokens, word_candidates=prev_word_candidates, 
-                                          action=action, reward=r, next_state=next_state_tokens, 
-                                          next_word_candidates=word_candidates, done=int(action == stop_action), 
-                                          legal_actions_mask=legal_actions_mask, indicators=indicators))  # legal_actions_mask is same for each rollout
+            # TODO: Condition adding to buffer on is_evaluation
+            if not is_evaluation:
+                self.buffer.append(Transition(state=curr_state_tokens, word_candidates=prev_word_candidates, 
+                                            action=action, reward=r, next_state=next_state_tokens, 
+                                            next_word_candidates=word_candidates, done=int(action == stop_action), 
+                                            legal_actions_mask=legal_actions_mask, indicators=indicators))  # legal_actions_mask is same for each rollout
 
             # Preparing all variables for next iteration
             curr_state = next_state
@@ -204,6 +228,8 @@ class RLWordSwap(SearchMethod):
             word_embedding = next_word_embedding
             indicator_embedding = next_indicator_embedding
 
+            # Removed below so that an adversarial example is ONLY returned if the stop_action is actually used
+            """
             if self._search_over and action != stop_action:  # if found adversarial example and was not intentional, finish up the episode 
                 # Insert to buffer the transition corresponding to stop action
                 next_state_tokens = AttackedText(curr_state.text).words 
@@ -212,9 +238,10 @@ class RLWordSwap(SearchMethod):
                                               next_word_candidates=word_candidates, done=1, 
                                               legal_actions_mask=legal_actions_mask, indicators=indicators))
                 rollout_reward += self.lambda_search_success
-                print("SEARCH OVER! ", self._search_over, "   Adding extra action to list")
-                print(curr_state)
+                # print("SEARCH OVER! ", self._search_over, "   Adding extra action to list")
+                # print(curr_state)
                 break
+            """
 
             if action == stop_action:
                 break
@@ -224,8 +251,9 @@ class RLWordSwap(SearchMethod):
             if len(self.buffer) >= self.min_steps_warm_up:
                 if len(self.buffer) == self.min_steps_warm_up:
                     print("Beginning training")
-                self.update_dqn()
-                self.epsilon = max(self.epsilon_final, self.epsilon - ((self.epsilon_init - self.epsilon_final) / self.epsilon_num_steps))
+                if not is_evaluation:
+                    self.update_dqn()
+                    self.epsilon = max(self.epsilon_final, self.epsilon - ((self.epsilon_init - self.epsilon_final) / self.epsilon_num_steps))
 
             
             if len(self.buffer) > self.max_buffer_size:
@@ -233,8 +261,9 @@ class RLWordSwap(SearchMethod):
         
         self.episode_returns.append(rollout_reward)
         
-        if len(self.episode_returns) % 10 == 0:
-            print("Average returns past 10 rollouts: ", sum(self.episode_returns[-10:]) / 10, flush=True)
+        if len(self.episode_returns) % 100 == 0:
+            print("Buffer size: ", len(self.buffer))
+            print("Average returns past 100 rollouts: ", sum(self.episode_returns[-100:]) / 100, flush=True)
             print("New epsilon value: ", self.epsilon)
 
         curr_state = self.cache[curr_state.text][0][0]
@@ -242,7 +271,7 @@ class RLWordSwap(SearchMethod):
         return curr_state
         
 
-    def get_action(self, sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask):
+    def get_action(self, sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask, is_evaluation):
         """
         probs = self.get_action_probs(sentence_embedding, word_embedding, indicator_embedding, legal_actions_mask)
         probs[0, legal_actions_mask] = (1 - self.epsilon) * probs[0, legal_actions_mask]
@@ -253,9 +282,13 @@ class RLWordSwap(SearchMethod):
         """
         
         output = self.model(sentence_embedding.unsqueeze(0), word_embedding.unsqueeze(0), torch.unsqueeze(indicator_embedding, 0))
+        # print("Evaluation: ", is_evaluation)
+        if is_evaluation:
+            epsilon = 0
+        else:
+            epsilon = self.epsilon
 
-
-        if np.random.random() < self.epsilon:
+        if np.random.random() < epsilon:
             probs = np.array(legal_actions_mask) / sum(legal_actions_mask)
             action = np.random.choice(probs.shape[0], p=probs)
             probs = np.zeros(len(legal_actions_mask))
@@ -345,19 +378,20 @@ class RLWordSwap(SearchMethod):
         s_score = s_goal_result[0].score 
         next_s_score = next_s_goal_result[0].score
 
-        self._search_over = next_s_goal_result[0].goal_status == GoalFunctionResultStatus.SUCCEEDED
+        self._search_over = (next_s_goal_result[0].goal_status == GoalFunctionResultStatus.SUCCEEDED) and a == stop_action
         # print("SEARCH OVER? ", self._search_over, status, next_s_goal_result[0].goal_status, GoalFunctionResultStatus.SUCCEEDED)
 
-        
         reward_logit_diff = next_s_score - s_score
-        reward_success = self.lambda_search_success if self._search_over and a == stop_action else 0  # only give the success if it was successful and intentional
+
+        if self._search_over:
+            return self.lambda_search_success
 
         if a == stop_action and not self._search_over:
             return self.constant_reward
 
         # print("rewards: ", self.lambda_logit_diff * reward_logit_diff)
     
-        return self.lambda_logit_diff * reward_logit_diff + reward_success + self.constant_reward
+        return self.lambda_logit_diff * reward_logit_diff + self.constant_reward
     
     @property
     def is_black_box(self):
