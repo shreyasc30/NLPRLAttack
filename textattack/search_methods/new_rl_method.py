@@ -113,7 +113,7 @@ class RLWordSwap(SearchMethod):
         result.num_queries = self.goal_function.num_queries
         return result
     
-    def perform_search(self, initial_result, is_evaluation=True):
+    def perform_search(self, initial_result, is_evaluation=True, constrain=0):
         # Initial result is the input 
         self._search_over = False 
         original_text = initial_result.attacked_text
@@ -158,6 +158,22 @@ class RLWordSwap(SearchMethod):
 
         # Create legal actions mask for this example
         legal_actions_mask = [1 if i < sum(indicators) else 0 for i in range(self.max_num_words_swappable_in_sentence)] + [1]
+        
+        # constrained setting
+        orig_score = self.get_goal_results(original_text)
+        leave_one = []
+        if constrain > 0:
+            for idx in range(len(legal_actions_mask) - 1):
+                i = legal_actions_mask[idx]
+                if i > 0:
+                    leave_one.append(original_text.replace_word_at_index(idx, self.unk_token))
+            leave_res, over = self.get_goal_results(leave_one)
+            scores = torch.tensor([result.score for result in leave_res])
+            scores -= orig_score
+            scores = torch.abs(scores)
+            _, idxs = torch.topk(scores, constrain)
+            legal_actions_mask = [0] * self.max_num_words_swappable_in_sentence + [1]
+            legal_actions_mask[idxs] = 1
 
         action_to_index = {}  # maps the action index to a tuple (index in sentence, index of the word options for that index)
         curr_action = 0
