@@ -160,7 +160,7 @@ class RLWordSwap(SearchMethod):
         legal_actions_mask = [1 if i < sum(indicators) else 0 for i in range(self.max_num_words_swappable_in_sentence)] + [1]
         
         # constrained setting
-        # orig_score = 
+        orig_score = self.get_goal_results(original_text)
         leave_one = []
         if constrain > 0:
             for idx in range(len(legal_actions_mask) - 1):
@@ -169,6 +169,8 @@ class RLWordSwap(SearchMethod):
                     leave_one.append(original_text.replace_word_at_index(idx, self.unk_token))
             leave_res, over = self.get_goal_results(leave_one)
             scores = torch.tensor([result.score for result in leave_res])
+            scores -= orig_score
+            scores = torch.abs(scores)
             _, idxs = torch.topk(scores, constrain)
             legal_actions_mask = [0] * self.max_num_words_swappable_in_sentence + [1]
             legal_actions_mask[idxs] = 1
