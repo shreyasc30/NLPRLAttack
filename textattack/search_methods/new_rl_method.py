@@ -158,10 +158,12 @@ class RLWordSwap(SearchMethod):
 
         # Create legal actions mask for this example
         legal_actions_mask = [1 if i < sum(indicators) else 0 for i in range(self.max_num_words_swappable_in_sentence)] + [1]
-
+        
         # constrained setting
+        # orig_score = 
+        leave_one = []
         if constrain > 0:
-            for idx in range(len(legal_actions_mask)):
+            for idx in range(len(legal_actions_mask) - 1):
                 i = legal_actions_mask[idx]
                 if i > 0:
                     leave_one.append(original_text.replace_word_at_index(idx, self.unk_token))
