@@ -117,16 +117,16 @@ class WordChangeRLSwap(WordChange):
 
 
     def get_best_swap(dict_, num_candidates):  #
-    best_swap_dict = {}
-    for key in dict_.keys():
-      diff_list = []
-      for num in range(num_candidates):
-        shared_char = sum(len(set(i)) == 1 for i in zip(list(key),list(dict_[key][num])))
-        diff_list.append(shared_char)
-      lowest_redundancy = min(diff_list)
-      best_swap_index = diff_list.index(lowest_redundancy)
-      best_swap_dict[key] = [dict_[key][best_swap_index]]
-    return best_swap_dict
+        best_swap_dict = {}
+        for key in dict_.keys():
+            diff_list = []
+            for num in range(num_candidates):
+                shared_char = sum(len(set(i)) == 1 for i in zip(list(key),list(dict_[key][num])))
+                diff_list.append(shared_char)
+            lowest_redundancy = min(diff_list)
+            best_swap_index = diff_list.index(lowest_redundancy)
+            best_swap_dict[key] = [dict_[key][best_swap_index]]
+          return best_swap_dict
 
 
 
