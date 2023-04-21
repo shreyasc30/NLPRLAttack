@@ -10,13 +10,12 @@ import regex as re
 
 class WordChangeRLSwap(WordChange):
     """An abstract class that takes a sentence and transforms it by replacing several words with synonyms
-
-
     num_of_candidates (int): number of synonyms per swappable word
     """
 
-    def __init__(self, num_candidates):
+    def __init__(self, num_candidates, dissimilar_swaps = False):  #
         self.num_candidates = num_candidates
+        self.dissimilar_swaps = dissimilar_swaps  # True or False  
         return
 
 
@@ -116,6 +115,21 @@ class WordChangeRLSwap(WordChange):
                 t_dict[key] = value
         return t_dict
 
+
+    def get_best_swap(dict_, num_candidates):  #
+        best_swap_dict = {}
+        for key in dict_.keys():
+            diff_list = []
+            for num in range(num_candidates):
+                shared_char = sum(len(set(i)) == 1 for i in zip(list(key),list(dict_[key][num])))
+                diff_list.append(shared_char)
+            lowest_redundancy = min(diff_list)
+            best_swap_index = diff_list.index(lowest_redundancy)
+            best_swap_dict[key] = [dict_[key][best_swap_index]]
+          return best_swap_dict
+
+
+
     def compress_changed_words(self, t_dict, processed_text, num_of_candidates=2):
         list_sentences_with_changes = []
         for num in range(num_of_candidates):
@@ -127,4 +141,3 @@ class WordChangeRLSwap(WordChange):
                 text_ = change
             list_sentences_with_changes.append(change)
         return list_sentences_with_changes
-
