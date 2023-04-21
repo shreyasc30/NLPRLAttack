@@ -23,7 +23,7 @@ class WordChange(Transformation):
     def _get_transformations(self, text, indices_to_modify):
         text = text.text  # AttackText object has attribute text to access the full string
         text = process_text(text)
-        if dissimilar_swaps == True: #
+        if self.dissimilar_swaps == True: #
             word_dict = self.change_words(text, num_candidates=3)
             word_dict = self.remove_null_swaps(word_dict)
             word_dict = self.get_best_swap(word_dict, num_candidates=3)
