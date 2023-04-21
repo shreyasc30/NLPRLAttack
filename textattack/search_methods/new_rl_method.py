@@ -24,24 +24,28 @@ Transition = collections.namedtuple(
 
 
 class RLWordSwap(SearchMethod): 
-    def __init__(self, lr, gamma, batch_size):
+    def __init__(self, lr, gamma, batch_size, constrain=0):
         # TODO: Figure out the mebedding space
         self.buffer = []
         self.batch_size = batch_size
         self.gamma = gamma
 
+        # Word candidate properties
+        self.constrain = constrain
+        self.unk_token = "<oov>"  # this is taken from the Glove Embedding file
+
         # DQN Parameters
         self.max_length_rollout = 250
         self.min_steps_warm_up = 200000
         self.update_target_every = 5000
-        self.max_buffer_size = 3e5
+        self.max_buffer_size = int(3e5)
         self.updates_so_far = 0
 
         # Exploration Parameters
         self.epsilon_init = 1
         self.epsilon_final = .1
         self.epsilon = self.epsilon_init
-        self.epsilon_num_steps = 200000
+        self.epsilon_num_steps = 100000
 
         # Hyperparameters for reward function 
         self.lambda_logit_diff = 100
@@ -113,7 +117,7 @@ class RLWordSwap(SearchMethod):
         result.num_queries = self.goal_function.num_queries
         return result
     
-    def perform_search(self, initial_result, is_evaluation=True, constrain=0):
+    def perform_search(self, initial_result, is_evaluation=True):
         # Initial result is the input 
         self._search_over = False 
         original_text = initial_result.attacked_text
@@ -160,20 +164,22 @@ class RLWordSwap(SearchMethod):
         legal_actions_mask = [1 if i < sum(indicators) else 0 for i in range(self.max_num_words_swappable_in_sentence)] + [1]
         
         # constrained setting
-        orig_score = self.get_goal_results(original_text)
+        result_original, _ = self.get_goal_results([edited_attacked_text])
         leave_one = []
-        if constrain > 0:
+        if self.constrain > 0:
+            constrain = min(self.constrain, sum(legal_actions_mask) - 1)
             for idx in range(len(legal_actions_mask) - 1):
                 i = legal_actions_mask[idx]
                 if i > 0:
-                    leave_one.append(original_text.replace_word_at_index(idx, self.unk_token))
+                    leave_one.append(edited_attacked_text.replace_word_at_index(idx, self.unk_token))
             leave_res, over = self.get_goal_results(leave_one)
             scores = torch.tensor([result.score for result in leave_res])
-            scores -= orig_score
+            scores -= result_original[0].score
             scores = torch.abs(scores)
             _, idxs = torch.topk(scores, constrain)
-            legal_actions_mask = [0] * self.max_num_words_swappable_in_sentence + [1]
-            legal_actions_mask[idxs] = 1
+            legal_actions_mask = [0] * self.max_num_words_swappable_in_sentence
+            legal_actions_mask = [1 if j in idxs else 0 for j, ind in enumerate(legal_actions_mask)] + [1]
+            # print(idxs, legal_actions_mask, flush=True)
 
         action_to_index = {}  # maps the action index to a tuple (index in sentence, index of the word options for that index)
         curr_action = 0

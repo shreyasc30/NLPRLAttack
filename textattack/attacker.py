@@ -158,14 +158,15 @@ class Attacker:
         sample_exhaustion_warned = False
 
         # TODO: Insert training loop here: 
-        training_epochs = 350
+        training_epochs = 400
+        training_examples = 50
         if isinstance(self.attack.search_method, RLWordSwap):
             print("\nEntering training loop...")
             for i in range(training_epochs): 
                 worklist_copy = worklist.copy()
                 example_count = 0
                 success_count = 0 
-                while worklist_copy:
+                while worklist_copy and example_count < training_examples:
                     idx = worklist_copy.popleft()
                     try: 
                         example, ground_truth_output = self.dataset[idx]
