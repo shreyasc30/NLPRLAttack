@@ -16,7 +16,7 @@ from textattack.models.RL_method import RLWrapper
 
 from textattack.shared import utils
 
-from textattack.transformations.word_changes import process_text
+from textattack.transformations.word_change import process_text
 
 Transition = collections.namedtuple(
     "Transition",
@@ -35,7 +35,7 @@ class RLWordSwap(SearchMethod):
         self.unk_token = "<oov>"  # this is taken from the Glove Embedding file
 
         # DQN Parameters
-        self.max_length_rollout = 250
+        self.max_length_rollout = 1
         self.min_steps_warm_up = 200000
         self.update_target_every = 5000
         self.max_buffer_size = int(3e5)
@@ -62,8 +62,8 @@ class RLWordSwap(SearchMethod):
         self.embedding = GloveEmbeddingLayer(emb_layer_trainable=False) # GloveTokenizer(word_id_map=self.word2idx, pad_token_id=len(self.word2idx), unk_token_id=len(self.word2idx)+1, max_length=256)
 
         self.embedding_size = 200 
-        self.max_num_words_in_sentence = 137 # 137  # These two values are manually inputed values based on the dataset
-        self.max_num_words_swappable_in_sentence = 61 # 61
+        self.max_num_words_in_sentence = 138 # 137  # These two values are manually inputed values based on the dataset
+        self.max_num_words_swappable_in_sentence = 62 # 61
 
         # For MLP, the input size has 3 parts: sentence embedding, word swap embedding, and the indicators for swappable token indices
         # self.input_size = self.embedding_size * (self.max_num_words_in_sentence + self.max_num_words_swappable_in_sentence) + self.max_num_words_swappable_in_sentence  
@@ -123,12 +123,15 @@ class RLWordSwap(SearchMethod):
         original_text = initial_result.attacked_text
         curr_state = initial_result
 
-        original_text = self.take_out_extra_spaces(original_text.text) 
+        original_text = self.take_out_extra_spaces(original_text.text)
         edited_attacked_text = AttackedText(original_text)
         
         transformed_texts = self.get_transformations(edited_attacked_text, None)
-        original_text = process_text(original_text)
         # Get the indices of the candidate words to switch out 
+
+        # This needs to be reinstantiated for..weird reasons
+        original_text = process_text(original_text)
+        edited_attacked_text = AttackedText(original_text)
 
         tokens = edited_attacked_text.words
         indicators = [0 for _ in range(len(tokens))]

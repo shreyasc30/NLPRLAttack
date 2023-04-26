@@ -158,7 +158,7 @@ class Attacker:
         sample_exhaustion_warned = False
 
         # TODO: Insert training loop here: 
-        training_epochs = 400
+        training_epochs = 1 # 220
         training_examples = 50
         if isinstance(self.attack.search_method, RLWordSwap):
             print("\nEntering training loop...")

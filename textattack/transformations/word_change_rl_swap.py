@@ -64,6 +64,8 @@ class WordChangeRLSwap(WordChange):
 
         text_list = list(processed_text.split(" "))  # split text and convert to string
         wordz = self.swapable_words(text_list)  # get words that should be swapped
+
+        # wordz = [''.join(letter for letter in w if letter.isalnum()) for w in wordz]
         
         mask_list = []
         for pattern in list(wordz):
@@ -116,7 +118,7 @@ class WordChangeRLSwap(WordChange):
         return t_dict
 
 
-    def get_best_swap(dict_, num_candidates):  #
+    def get_best_swap(self, dict_, num_candidates):  #
         best_swap_dict = {}
         for key in dict_.keys():
             diff_list = []
@@ -126,7 +128,7 @@ class WordChangeRLSwap(WordChange):
             lowest_redundancy = min(diff_list)
             best_swap_index = diff_list.index(lowest_redundancy)
             best_swap_dict[key] = [dict_[key][best_swap_index]]
-          return best_swap_dict
+        return best_swap_dict
 
 
 

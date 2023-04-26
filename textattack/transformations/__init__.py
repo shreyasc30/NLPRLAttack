@@ -15,5 +15,5 @@ from .word_merges import *
 from .composite_transformation import CompositeTransformation
 from .word_deletion import WordDeletion
 from .word_innerswap_random import WordInnerSwapRandom
-from .word_changes import WordChange
+from .word_change import WordChange
 from .word_change_rl_swap import WordChangeRLSwap

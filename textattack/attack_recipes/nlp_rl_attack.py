@@ -41,7 +41,7 @@ class NLPRLAttack(AttackRecipe):
     def build(model_wrapper):
         # [from correspondence with the author]
         # Candidate size K is set to 48 for all data-sets.
-        transformation = WordChangeRLSwap(num_candidates=1)# WordSwapMaskedLM(method="bert-attack", max_candidates=48)
+        transformation = WordChangeRLSwap(num_candidates=1, dissimilar_swaps=True)# WordSwapMaskedLM(method="bert-attack", max_candidates=48)
         #
         # Don't modify the same word twice or stopwords.
         #
@@ -58,6 +58,6 @@ class NLPRLAttack(AttackRecipe):
         # is the sentence after replacing wi with [MASK]. Then we rank all the words
         # according to the ranking score Iwi in descending order to create word list
         # L."
-        search_method = RLWordSwap(lr=3e-4, gamma=.975, batch_size=128, constrain=20)
+        search_method = RLWordSwap(lr=3e-4, gamma=.975, batch_size=128, constrain=0)
 
         return Attack(goal_function, constraints, transformation, search_method)

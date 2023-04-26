@@ -4,7 +4,8 @@ import re
 
 def process_text(text):
     
-    new_text_list = list(text.replace('\\', ' ').replace("'",' ').replace("''", ' ').replace("!@#$%^&*()[]{};:',./<>?|`~-=_+", ' ').split(" ")) #
+    # new_text_list = list(text.replace('\\', ' ').replace("'",' ').replace("''", ' ').replace("!@#$%^&*()[]{};:',./<>?|`~-=_+", ' ').split(" ")) #
+    new_text_list = list(text.replace('\\', ' ').replace('[','').replace(']',' ').replace('(',' ').replace(')',' ').split(" "))
     processed_text = ' '.join(new_text_list)
     return processed_text
 
